@@ -55,6 +55,7 @@ import {
   type ProbedOpenCode,
 } from "./versionProbe.ts";
 import * as OpenCodeServerOwner from "./OpenCodeServerOwner.ts";
+import { harnessConfigContent, readHarnessResources } from "./harnessResources.ts";
 import * as OpenCode2Client from "./v2/OpenCode2Client.ts";
 import * as OpenCode2Server from "./v2/OpenCode2Server.ts";
 import {
@@ -269,11 +270,21 @@ export const OpenCodeDriver: ProviderDriver<
                 Effect.andThen(cachedMaintenance({ fresh: true })),
               )
             : cachedMaintenance();
+      const harness = yield* readHarnessResources(processEnv);
+      const v1Config = harnessConfigContent(processEnv, harness, "v1");
+      const v2Config = harnessConfigContent(processEnv, harness, "v2");
       const openCodeV1Adapter = yield* OpenCodeAdapterV2.OpenCodeAdapterV2Driver.create({
         instanceId,
         displayName,
         accentColor,
-        environment,
+        // The adapter merges these over the host environment, so the config content goes in as one more variable.
+        environment:
+          v1Config === undefined
+            ? environment
+            : [
+                ...(environment ?? []),
+                { name: "OPENCODE_CONFIG_CONTENT", value: v1Config, sensitive: false },
+              ],
         enabled,
         config,
       }).pipe(
@@ -293,7 +304,10 @@ export const OpenCodeDriver: ProviderDriver<
         serverUrl: effectiveConfig.serverUrl,
         serverPassword: effectiveConfig.serverPassword,
         directory: host.paths.cwd,
-        environment: processEnv,
+        environment:
+          v2Config === undefined
+            ? processEnv
+            : { ...processEnv, OPENCODE_CONFIG_CONTENT: v2Config },
       }).pipe(
         Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
         Effect.provideService(
